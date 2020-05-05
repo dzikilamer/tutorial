@@ -1,0 +1,617 @@
+{
+ "cells": [
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "# Ensemble learning\n",
+    "Tutorial pokrywa najbardziej popularne metody uczenia zespołowego w oparciu o problem klasyfikacji.\n",
+    "\n",
+    "Prezentacja dostępna pod linkiem: https://docs.google.com/presentation/d/102wXkjtPx06q1AxpQK76ytD0gamjus-leKIWr7xzjDk/edit?usp=sharing  \n",
+    "Dokumentacja używanych metod: https://scikit-learn.org/stable/modules/ensemble.html"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "import random\n",
+    "import numpy as np\n",
+    "import matplotlib.pyplot as plt\n",
+    "import matplotlib.colors as mcolors\n",
+    "import pandas as pd\n",
+    "import seaborn as sns\n",
+    "\n",
+    "from sklearn.datasets import fetch_openml\n",
+    "from sklearn.preprocessing import StandardScaler\n",
+    "from sklearn.decomposition import PCA\n",
+    "from sklearn.manifold import TSNE\n",
+    "from sklearn.model_selection import train_test_split\n",
+    "from sklearn.svm import SVC\n",
+    "from sklearn.ensemble import BaggingClassifier, AdaBoostClassifier, RandomForestClassifier\n",
+    "from sklearn.metrics import f1_score"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "### Używając PCA transformujemy podzbiór MNIST do przestrzeni 30D"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "mnist = fetch_openml(\"mnist_784\", data_home=\"data/mnist_784\", cache=True)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "zipped_mnist = list(zip(mnist.data, mnist.target))\n",
+    "mnist_random = random.sample(zipped_mnist, 10000)\n",
+    "x, y = zip(*(mnist_random))\n",
+    "x = np.asarray(x)\n",
+    "y = np.asarray(y)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "scaler = StandardScaler()\n",
+    "x_scaled = scaler.fit_transform(x)\n",
+    "\n",
+    "pca = PCA(30)\n",
+    "x_pca = pca.fit_transform(x_scaled)"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "### Wybieramy ze zbioru dwie trudno rozdzielalne klasy. Będą to zbiory danych do następnych ćwiczeń."
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "x_embedded = TSNE(n_components=2).fit_transform(x_pca)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "plt.figure(figsize=(15,10))\n",
+    "\n",
+    "for c, ids in zip(mcolors.TABLEAU_COLORS, [str(i) for i in range(10)]):\n",
+    "    plt.scatter(x_embedded[y == ids, 0], x_embedded[y == ids, 1], c=c, label=ids)\n",
+    "plt.legend()\n",
+    "plt.show()"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "Jak widać na powyższym wykresie istnieją klasy, które wzajemnie na siebie nachodzą.  \n",
+    "Przykładem mogą być:  \n",
+    "    - 3 i 8  \n",
+    "    - 3 i 5  \n",
+    "    - 5 i 8  \n",
+    "    - 4 i 9  \n",
+    "    - 7 i 9  \n",
+    "Do dalszych zadań wybieramy klasę 3 i 8 "
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "digit_filter = np.where((y == '3') | (y == '8'))\n",
+    "x_filtered, y_filtered = x_pca[digit_filter], y[digit_filter]"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "x_train, x_test, y_train, y_test = train_test_split(x_filtered, y_filtered, train_size=0.8)\n",
+    "x_train.shape"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "## Bagging\n",
+    "\n",
+    "Każdy z 5 klasyfikatorów jest trenowany za pomocą pozdbioru o wielkości 40% calego zbioru.\n",
+    "\n",
+    "https://scikit-learn.org/stable/modules/generated/sklearn.ensemble.BaggingClassifier.html"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "classifier = BaggingClassifier(base_estimator=SVC(), n_estimators=5, max_samples=0.4, bootstrap=True) \n",
+    "classifier.fit(x_train, y_train)\n",
+    "classifier.score(x_test, y_test)"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "Definujemy fukncje pomocnicze do obliczania wyników klasyfikacji oraz ich graficznej prezentacji"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "def ensemble(Clf, estimators=[5], samples=[0.9], features=[0.9], params={}):\n",
+    "    result = pd.DataFrame(columns=['n_estimators', 'max_features', 'max_samples', 'score_f1', 'score'])\n",
+    "    for n_estimators in estimators:\n",
+    "        for max_samples in samples:\n",
+    "            for max_features in features:\n",
+    "                clf = Clf(max_features=max_features, n_estimators=n_estimators, max_samples=max_samples, **params)\n",
+    "                clf.fit(x_train, y_train)\n",
+    "                pred = clf.predict(x_test)\n",
+    "                row = { 'n_estimators':n_estimators,\n",
+    "                        'max_samples':max_samples,\n",
+    "                        'max_features':max_features,\n",
+    "                        'score': clf.score(x_test, y_test),\n",
+    "                        'score_f1': f1_score(y_test, pred, average='weighted')\n",
+    "                      }\n",
+    "                result = result.append(row, ignore_index=True)\n",
+    "    return result\n",
+    "\n",
+    "    \n",
+    "def draw_heatmap(param1, param2, df, score='score'):\n",
+    "    score = df.pivot(param1, param2, score)\n",
+    "    plt.figure(figsize=(10,10))\n",
+    "    sns.heatmap(score,annot=True, cmap='coolwarm')"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "Obserwujemy zmianę dokładności klasyfikacji i F1 dla wzrastającej liczby klasyfikatorów w zespole i liczby przykładów, na których uczone są klasyfikatory proste."
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "estimators = range(5, 51, 5)\n",
+    "samples = list(map(lambda x: round(x, 1), np.arange(0.1, 1.1, 0.1)))\n",
+    "\n",
+    "params = {\"base_estimator\": SVC(), \"bootstrap\": True} # bootstrap = True zapewnia losowość podzbiorów danych\n",
+    "result = ensemble(BaggingClassifier, estimators=estimators, samples=samples, params=params)\n",
+    "result"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "scrolled": false
+   },
+   "outputs": [],
+   "source": [
+    "# dokładność klasyfikacji\n",
+    "draw_heatmap('n_estimators', 'max_samples', result)\n",
+    "\n",
+    "# F1\n",
+    "draw_heatmap('n_estimators', 'max_samples', result, score='score_f1')"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "### ZADANIE:\n",
+    "\n",
+    "Jak zmienia się dokładność klasyfikacji dla różnych metod określania finalnej decyzji. Porównać wynik klasycznego baggingu z wynikami dla VotingClassifier(z opcją voting='hard' oraz voting='soft')"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "## Random Subspace\n",
+    "Do trenowania każdego z klasyfikatorów wykorzystany jest cały zbiór danych, lecz tylko połowa cech.\n",
+    "\n",
+    "https://scikit-learn.org/stable/modules/generated/sklearn.ensemble.BaggingClassifier.html"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "classifier = BaggingClassifier(base_estimator=SVC(), n_estimators=5, bootstrap_features=True, max_features=0.5)\n",
+    "classifier.fit(x_train, y_train)\n",
+    "classifier.score(x_test, y_test)"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "Teraz obserwujemy zmienę dokładność klasyfikacji i F1 dla Random Subspace."
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "scrolled": false
+   },
+   "outputs": [],
+   "source": [
+    "estimators = range(5, 51, 5)\n",
+    "features = list(map(lambda x: round(x, 1), np.arange(0.1, 1.1, 0.1)))\n",
+    "\n",
+    "params = {\"base_estimator\": SVC(), \"bootstrap_features\": True} # zapewnia losowość pozdbioru cech\n",
+    "\n",
+    "result = ensemble(BaggingClassifier, estimators=estimators, features=features, params=params)\n",
+    "\n",
+    "draw_heatmap('n_estimators', 'max_features', result)\n",
+    "\n",
+    "draw_heatmap('n_estimators', 'max_features', result, score='score_f1')"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "### ZADANIE:\n",
+    "\n",
+    "Jak zmienia się dokładność klasyfikacji dla różnych metod określania finalnej decyzji. Porównać wynik otrzymany dla random subspace z wynikami dla VotingClassifier(z opcją voting='hard' oraz voting='soft')"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "## Random Patches\n",
+    "Jest to połączenie klasycznego Baggingu i RandomSubspace.\n",
+    "\n",
+    "Każdy z klasyfikatorów jest trenowany na podzbiorze danych oraz podzbiorze cech.\n",
+    "\n",
+    "https://scikit-learn.org/stable/modules/generated/sklearn.ensemble.BaggingClassifier.html\n"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "classifier = BaggingClassifier(base_estimator=SVC(), n_estimators=5, \n",
+    "                               bootstrap_features=True, max_features=0.5, max_samples=0.4)\n",
+    "classifier.fit(x_train, y_train)\n",
+    "classifier.score(x_test, y_test)"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "Teraz obserwujemy zmianę dokładności klasyfikacji i F1 w zależności od wielkości podzbioru danych i cech."
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "samples = list(map(lambda x: round(x, 1), np.arange(0.1, 1.1, 0.1)))\n",
+    "features = list(map(lambda x: round(x, 1), np.arange(0.1, 1.1, 0.1)))\n",
+    "\n",
+    "params = {\"base_estimator\": SVC(), \"bootstrap_features\": True, \"bootstrap\": True }\n",
+    "\n",
+    "result = ensemble(BaggingClassifier, features=features, samples=samples, params=params)\n",
+    "\n",
+    "draw_heatmap('max_samples', 'max_features', result)\n",
+    "\n",
+    "draw_heatmap('max_samples', 'max_features', result, score='score_f1')"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "### ZADANIE:\n",
+    "\n",
+    "Jak zmienia się dokładność klasyfikacji dla różnych metod określania finalnej decyzji. Porównać wynik otrzymany dla random patches z wynikami dla VotingClassifier(z opcją voting='hard' oraz voting='soft')"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "## AdaBoost\n",
+    "Jest to metoda, która dla nowo tworzonych kopi klasyfikatorów uwzględnia dodatkowo wagi nieprawidłowo sklasyfikowanych instancji, tak aby mogły się one skoncentrować na bardziej skomplikowanych przypadkach.  \n",
+    "Domyślnie jako klasyfikator bazowy używany jest DecisionTreeClassifier.\n",
+    "\n",
+    "https://scikit-learn.org/stable/modules/generated/sklearn.ensemble.AdaBoostClassifier.html"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "classifier = AdaBoostClassifier(n_estimators=5, random_state=7)\n",
+    "classifier.fit(x_train, y_train)\n",
+    "classifier.score(x_test, y_test)"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "Teraz obserwujemy zmianę dokładności klasyfikacji i F1 dla AdaBoost."
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "estimators = range(5, 101, 5)\n",
+    "\n",
+    "result = pd.DataFrame(columns=['n_estimators', 'score', 'score_f1'])\n",
+    "for n_estimators in estimators:\n",
+    "    clf = AdaBoostClassifier(n_estimators=n_estimators, random_state=7)\n",
+    "    clf.fit(x_train, y_train)\n",
+    "    pred = clf.predict(x_test)\n",
+    "    row = { 'n_estimators':n_estimators,\n",
+    "            'score': clf.score(x_test, y_test),\n",
+    "            'score_f1': f1_score(y_test, pred, average='weighted')\n",
+    "          }\n",
+    "    result = result.append(row, ignore_index=True)\n",
+    "result"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "result.score.max(), result.score.idxmax()"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "result.score_f1.max(), result.score_f1.idxmax()"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "## Random Forest\n",
+    "Jest to metoda oparta o las drzew uczących. Każde z nich uczone jest na losowo wybranym podzbiorze danych wraz z podzbiorem cech. Skutkuje to zmniejszoną korelacją pomiędzy poszczególnymi drzewami.  \n",
+    "Poniżej przedstawiono wynik klasyfikacji dla 5 klasyfikatorów oraz zbiorze cech równym połowie początkowego zbioru.\n",
+    "\n",
+    "https://scikit-learn.org/stable/modules/generated/sklearn.ensemble.RandomForestClassifier.html"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "classifier = RandomForestClassifier(n_estimators=5, max_features=0.5)\n",
+    "classifier.fit(x_train, y_train)\n",
+    "classifier.score(x_test, y_test)"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "Teraz obserwujemy zmianę dokładności klasyfikacji i F1 dla Random Forest.\n"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "estimators = range(5, 51, 5)\n",
+    "features = list(map(lambda x: round(x, 1), np.arange(0.1, 1.1, 0.1)))\n",
+    "\n",
+    "result = ensemble(RandomForestClassifier, estimators=estimators, features=features)\n",
+    "\n",
+    "draw_heatmap('n_estimators', 'max_features', result)\n",
+    "\n",
+    "draw_heatmap('n_estimators', 'max_features', result, score='score_f1')"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "## Zadanie indywidualne"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "1. Przetransformować zbiór FMNIST używając PCA do przestrzeni 30D. Następnie wybrać 2 trudno rozdzielane klasy"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "2. Sprawdzić jak działa klasyczny Bagging dla 5 klasyfikatorów prostych. Następnie określić:  \n",
+    "    a) jak zmienia się dokładność klasyfikacji oraz F1 score dla wzrastającej liczby klasyfikatorów i wielkości podzbioru danych, na których są uczone klasyfikatory  \n",
+    "    b) jak zmienia się dokładność klasyfikacji dla różnych metod określania finalnej decyzji."
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "3. Sprawdzić jak działa RandomSubspace dla 5 klasyfikatorów prostych. Następnie określić:  \n",
+    "    a) jak zmienia się dokładność klasyfikacji oraz F1 score dla wzrastającej liczby klasyfikatorów i wielkości podzbioru cech, na których są uczone klasyfikatory  \n",
+    "    b) jak zmienia się dokładność klasyfikacji dla różnych metod określania finalnej decyzji."
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "4. Sprawdzić jak działa RandomPatches dla 5 klasyfikatorów prostych. Następnie określić:  \n",
+    "    a) jak zmienia się dokładność klasyfikacji oraz F1 score dla wzrastającej wielkości pozdzbioru danych i wielkości podzbioru cech, na których są uczone klasyfikatory  \n",
+    "    b) jak zmienia się dokładność klasyfikacji dla różnych metod określania finalnej decyzji."
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "5. Sprawdzić jak działa AdaBoost dla 5 klasyfikatorów prostych. Następnie określić:  \n",
+    "    a) jak zmienia się dokładność klasyfikacji oraz F1 score dla wzrastającej liczby klasyfikatorów"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "6. Sprawdzić jak działa RandomForest dla 5 klasyfikatorów prostych. Następnie określić:  \n",
+    "    a) jak zmienia się dokładność klasyfikacji oraz F1 score dla wzrastającej liczby klasyfikatorów i wielkości podzbioru cech, na których są uczone klasyfikatory"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  }
+ ],
+ "metadata": {
+  "kernelspec": {
+   "display_name": "Python 3",
+   "language": "python",
+   "name": "python3"
+  },
+  "language_info": {
+   "codemirror_mode": {
+    "name": "ipython",
+    "version": 3
+   },
+   "file_extension": ".py",
+   "mimetype": "text/x-python",
+   "name": "python",
+   "nbconvert_exporter": "python",
+   "pygments_lexer": "ipython3",
+   "version": "3.7.6"
+  }
+ },
+ "nbformat": 4,
+ "nbformat_minor": 4
+}
